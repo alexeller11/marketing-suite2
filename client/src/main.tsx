@@ -52,6 +52,16 @@ const trpcClient = trpc.createClient({
   ],
 });
 
+// Global error handler for debugging
+if (typeof window !== "undefined") {
+  window.addEventListener("error", (event) => {
+    console.error("[Global Error]", event.error, event.message, event.filename, event.lineno, event.colno);
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    console.error("[Unhandled Promise Rejection]", event.reason);
+  });
+}
+
 createRoot(document.getElementById("root")!).render(
   <trpc.Provider client={trpcClient} queryClient={queryClient}>
     <QueryClientProvider client={queryClient}>

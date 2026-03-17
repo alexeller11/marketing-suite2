@@ -10,8 +10,9 @@ import { getLoginUrl } from "@/const";
 export default function Dashboard() {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
-  const { data: campaigns, isLoading } = trpc.campaigns.list.useQuery(undefined, {
+  const { data: campaigns, isLoading, error: campaignsError } = trpc.campaigns.list.useQuery(undefined, {
     enabled: isAuthenticated,
+    retry: false,
   });
 
   if (authLoading) {
@@ -28,13 +29,17 @@ export default function Dashboard() {
         <h1 className="text-4xl font-bold text-white">Marketing Suite</h1>
         <p className="text-xl text-slate-300">Gerencie suas campanhas de marketing com IA</p>
         <Button
-          onClick={() => setLocation(getLoginUrl())}
+          onClick={() => window.location.href = getLoginUrl()}
           className="bg-pink-600 hover:bg-pink-700 text-white px-8 py-3 text-lg"
         >
           Fazer Login
         </Button>
       </div>
     );
+  }
+
+  if (campaignsError) {
+    console.error("[Dashboard] Error loading campaigns:", campaignsError);
   }
 
   // Dados de exemplo para gráficos

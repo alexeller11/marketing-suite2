@@ -26,8 +26,9 @@
 - [x] Implementar design cyberpunk com tema neon rosa/ciano
 
 ## Testes e Validação
-- [ ] Testar autenticação OAuth no app
-- [ ] Testar sincronização de dados das APIs
+- [x] Testar autenticação OAuth no app
+- [x] Testar sincronização de dados das APIs
+- [x] Corrigir erro de script na página inicial
 - [ ] Testar Planejador de IA com dados reais
 - [ ] Validar gráficos e visualizações no Dashboard
 - [ ] Testar alertas de orçamento
