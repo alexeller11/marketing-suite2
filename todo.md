@@ -1,5 +1,12 @@
 # Marketing Suite - TODO
 
+## Deploy no Render
+- [ ] Exportar código para GitHub
+- [ ] Conectar repositório ao Render
+- [ ] Configurar variáveis de ambiente
+- [ ] Executar primeiro deploy
+- [ ] Validar aplicação em produção
+
 ## Banco de Dados
 - [x] Configurar PostgreSQL no Neon ou Supabase
 - [x] Obter DATABASE_URL e adicionar como variável de ambiente
