@@ -10,6 +10,7 @@ build/
 # Environment variables
 .env
 .env.local
+pnpm-lock.yaml
 .env.development.local
 .env.test.local
 .env.production.local
