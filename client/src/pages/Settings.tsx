@@ -79,14 +79,12 @@ export default function Settings() {
         <h2 className="text-2xl font-bold text-white">Configurações</h2>
         <p className="text-slate-400 text-sm mt-0.5">Conecte suas plataformas de anúncios</p>
       </div>
-
       <Tabs defaultValue="meta" className="w-full max-w-3xl">
         <TabsList className="grid w-full grid-cols-3 bg-slate-800 border border-slate-700 mb-6">
           <TabsTrigger value="meta" className="data-[state=active]:text-pink-400">Meta Ads</TabsTrigger>
           <TabsTrigger value="google" className="data-[state=active]:text-cyan-400">Google Ads</TabsTrigger>
           <TabsTrigger value="alerts" className="data-[state=active]:text-yellow-400">Alertas</TabsTrigger>
         </TabsList>
-
         <TabsContent value="meta">
           <Card className="bg-slate-800 border-slate-700">
             <CardHeader>
@@ -147,7 +145,6 @@ export default function Settings() {
             </CardContent>
           </Card>
         </TabsContent>
-
         <TabsContent value="google">
           <Card className="bg-slate-800 border-slate-700">
             <CardHeader>
@@ -208,7 +205,6 @@ export default function Settings() {
             </CardContent>
           </Card>
         </TabsContent>
-
         <TabsContent value="alerts">
           <Card className="bg-slate-800 border-slate-700 mb-4">
             <CardHeader>
@@ -256,17 +252,3 @@ export default function Settings() {
     </DashboardLayout>
   );
 }
-```
-
----
-
-## ⚠️ Antes do deploy — adicione no Render
-```
-META_APP_ID=1748220689689304
-META_APP_SECRET=6c5421fc9134212b96096e5a4b6f5eb8
-GOOGLE_API_KEY=-ENtyxwHVbD-iWslE05clQ
-```
-
-E adicione no Google Cloud Console → Credenciais OAuth → URIs de redirecionamento autorizados:
-```
-https://marketing-suite.onrender.com/api/auth/google-ads/callback
