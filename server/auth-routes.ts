@@ -38,8 +38,8 @@ router.get('/google/callback', async (req: Request, res: Response) => {
     // Create session cookie
     const secret = new TextEncoder().encode(process.env.JWT_SECRET || 'secret');
     const token = await new SignJWT({
+      sub: user.openId,
       userId: user.id,
-      openId: user.openId,
       email: user.email,
       name: user.name,
     })
