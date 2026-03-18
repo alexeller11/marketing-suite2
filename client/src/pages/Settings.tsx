@@ -1,42 +1,36 @@
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, Key, CheckCircle, RefreshCw, Trash2, Bell } from "lucide-react";
-import { useState } from "react";
+import { Label } from "@/components/ui/label";
+import { Loader2, CheckCircle, RefreshCw, Trash2, Bell, Link, AlertCircle } from "lucide-react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { useAuth } from "@/_core/hooks/useAuth";
 
 export default function Settings() {
   const { isAuthenticated } = useAuth();
-  const [metaToken, setMetaToken] = useState("");
-  const [metaAccountId, setMetaAccountId] = useState("");
-  const [metaRefresh, setMetaRefresh] = useState("");
-  const [googleToken, setGoogleToken] = useState("");
-  const [googleRefresh, setGoogleRefresh] = useState("");
-  const [syncingMeta, setSyncingMeta] = useState(false);
   const [alertThreshold, setAlertThreshold] = useState(80);
   const [alertCampaignId, setAlertCampaignId] = useState<string>("");
+  const [selectedMetaAccount, setSelectedMetaAccount] = useState<string>("");
+  const [selectedGoogleAccount, setSelectedGoogleAccount] = useState<string>("");
+  const [googleAccounts, setGoogleAccounts] = useState<any[]>([]);
+  const [loadingGoogleAccounts, setLoadingGoogleAccounts] = useState(false);
 
   const { data: metaCreds, refetch: refetchMeta } = trpc.integrations.getCredentials.useQuery("meta", { enabled: isAuthenticated });
   const { data: googleCreds, refetch: refetchGoogle } = trpc.integrations.getCredentials.useQuery("google", { enabled: isAuthenticated });
   const { data: alerts, refetch: refetchAlerts } = trpc.budgetAlerts.list.useQuery(undefined, { enabled: isAuthenticated });
   const { data: campaigns } = trpc.campaigns.list.useQuery(undefined, { enabled: isAuthenticated });
+  const { data: syncStatus, refetch: refetchStatus } = trpc.sync.status.useQuery(undefined, { enabled: isAuthenticated });
 
-  const saveMeta = trpc.integrations.saveCredentials.useMutation({
-    onSuccess: () => { toast.success("Credenciais Meta salvas!"); setMetaToken(""); setMetaRefresh(""); refetchMeta(); },
-    onError: (e) => toast.error(`Erro: ${e.message}`),
-  });
-  const saveGoogle = trpc.integrations.saveCredentials.useMutation({
-    onSuccess: () => { toast.success("Credenciais Google salvas!"); setGoogleToken(""); setGoogleRefresh(""); refetchGoogle(); },
-    onError: (e) => toast.error(`Erro: ${e.message}`),
-  });
   const syncMeta = trpc.sync.meta.useMutation({
-    onSuccess: (data) => { toast.success(`${data.synced} campanha(s) sincronizada(s)!`); setSyncingMeta(false); },
-    onError: (e) => { toast.error(`Erro: ${e.message}`); setSyncingMeta(false); },
+    onSuccess: (data) => { toast.success(`${data.synced} campanha(s) sincronizada(s)!`); refetchStatus(); },
+    onError: (e) => toast.error(`Erro: ${e.message}`),
+  });
+  const syncGoogle = trpc.sync.google.useMutation({
+    onSuccess: (data) => { toast.success(`${data.synced} campanha(s) sincronizada(s)!`); },
+    onError: (e) => toast.error(`Erro: ${e.message}`),
   });
   const createAlert = trpc.budgetAlerts.create.useMutation({
     onSuccess: () => { toast.success("Alerta criado!"); refetchAlerts(); },
@@ -46,82 +40,175 @@ export default function Settings() {
     onSuccess: () => { toast.success("Alerta removido!"); refetchAlerts(); },
   });
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const success = params.get("success");
+    const error = params.get("error");
+    if (success === "meta_connected") {
+      const accounts = params.get("accounts");
+      toast.success(`Meta Ads conectado! ${accounts} conta(s) encontrada(s).`);
+      refetchMeta(); refetchStatus();
+    } else if (success === "google_ads_connected") {
+      toast.success("Google Ads conectado com sucesso!");
+      refetchGoogle(); refetchStatus();
+    } else if (error) {
+      toast.error(`Erro na conexão: ${error.replace(/_/g, " ")}`);
+    }
+    if (success || error) window.history.replaceState({}, "", "/settings");
+  }, []);
+
+  const loadGoogleAccounts = async () => {
+    setLoadingGoogleAccounts(true);
+    try {
+      const res = await fetch("/api/auth/google-ads/accounts", { credentials: "include" });
+      const data = await res.json();
+      setGoogleAccounts(data.accounts || []);
+    } catch (e) {
+      toast.error("Erro ao carregar contas Google Ads");
+    }
+    setLoadingGoogleAccounts(false);
+  };
+
+  useEffect(() => {
+    if (googleCreds?.connected) loadGoogleAccounts();
+  }, [googleCreds?.connected]);
+
   return (
     <DashboardLayout>
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-white">Configurações</h2>
         <p className="text-slate-400 text-sm mt-0.5">Conecte suas plataformas de anúncios</p>
       </div>
+
       <Tabs defaultValue="meta" className="w-full max-w-3xl">
         <TabsList className="grid w-full grid-cols-3 bg-slate-800 border border-slate-700 mb-6">
           <TabsTrigger value="meta" className="data-[state=active]:text-pink-400">Meta Ads</TabsTrigger>
           <TabsTrigger value="google" className="data-[state=active]:text-cyan-400">Google Ads</TabsTrigger>
           <TabsTrigger value="alerts" className="data-[state=active]:text-yellow-400">Alertas</TabsTrigger>
         </TabsList>
+
         <TabsContent value="meta">
           <Card className="bg-slate-800 border-slate-700">
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle className="text-white flex items-center gap-2"><Key className="text-pink-500" size={18} />Meta Ads</CardTitle>
-                {metaCreds?.connected && <span className="flex items-center gap-1.5 text-green-400 text-sm"><CheckCircle size={14} />Conectado</span>}
+                <CardTitle className="text-white flex items-center gap-2">
+                  <div className="w-5 h-5 rounded bg-blue-600 flex items-center justify-center text-white text-xs font-bold">f</div>
+                  Meta Ads
+                </CardTitle>
+                {metaCreds?.connected
+                  ? <span className="flex items-center gap-1.5 text-green-400 text-sm"><CheckCircle size={14} />Conectado</span>
+                  : <span className="flex items-center gap-1.5 text-slate-500 text-sm"><AlertCircle size={14} />Não conectado</span>}
               </div>
-              <CardDescription className="text-slate-400">Configure seu Access Token do Meta Business</CardDescription>
+              <CardDescription className="text-slate-400">Conecte via OAuth para sincronizar suas campanhas automaticamente</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="bg-slate-700/50 border border-slate-600 rounded-lg p-3 text-sm text-slate-300">
-                <p className="font-medium mb-1">Como obter:</p>
-                <ol className="list-decimal list-inside space-y-0.5 text-slate-400">
-                  <li>Acesse <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" className="text-pink-400 hover:underline">developers.facebook.com</a></li>
-                  <li>Seu App → Ferramentas → Explorador da API do Graph</li>
-                  <li>Gere token com permissão <code className="text-pink-300">ads_read</code></li>
-                  <li>Copie seu <strong>Ad Account ID</strong> no Gerenciador de Anúncios</li>
-                </ol>
-              </div>
-              <div><Label className="text-slate-300">Access Token</Label><Input type="password" placeholder="EAAxxxxx..." value={metaToken} onChange={e => setMetaToken(e.target.value)} className="bg-slate-700 border-slate-600 text-white mt-1.5" /></div>
-              <div><Label className="text-slate-300">Account ID</Label><Input placeholder="act_123456789" value={metaAccountId} onChange={e => setMetaAccountId(e.target.value)} className="bg-slate-700 border-slate-600 text-white mt-1.5" /></div>
-              <div><Label className="text-slate-300">Refresh Token (opcional)</Label><Input type="password" value={metaRefresh} onChange={e => setMetaRefresh(e.target.value)} className="bg-slate-700 border-slate-600 text-white mt-1.5" /></div>
-              <div className="flex gap-3">
-                <Button onClick={() => { if (!metaToken) return toast.error("Informe o Access Token"); saveMeta.mutate({ platform: "meta", accessToken: metaToken, refreshToken: metaRefresh || undefined, accountId: metaAccountId || undefined }); }}
-                  disabled={!metaToken || saveMeta.isPending} className="flex-1 bg-pink-600 hover:bg-pink-700 text-white">
-                  {saveMeta.isPending ? <Loader2 className="animate-spin mr-2" size={16} /> : null} Salvar Credenciais
+              {!metaCreds?.connected ? (
+                <Button onClick={() => window.location.href = "/api/auth/meta/login"}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white">
+                  <Link size={16} className="mr-2" /> Conectar Meta Ads
                 </Button>
-                {metaCreds?.connected && (
-                  <Button onClick={() => { if (!metaAccountId) return toast.error("Informe o Account ID"); setSyncingMeta(true); syncMeta.mutate({ accountId: metaAccountId }); }}
-                    disabled={syncingMeta || !metaAccountId} variant="outline" className="border-slate-600 text-slate-300 hover:bg-slate-700">
-                    {syncingMeta ? <Loader2 className="animate-spin mr-2" size={16} /> : <RefreshCw size={16} className="mr-2" />} Sincronizar
+              ) : (
+                <div className="space-y-4">
+                  <div className="bg-slate-700/50 rounded-lg p-3">
+                    <p className="text-slate-300 text-sm font-medium mb-2">Contas de anúncios ({metaCreds.adAccounts?.length || 0})</p>
+                    {metaCreds.adAccounts?.length > 0 ? (
+                      <div className="space-y-1.5">
+                        {metaCreds.adAccounts.map((acc: any) => (
+                          <label key={acc.id} className="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="metaAccount" value={acc.id}
+                              checked={selectedMetaAccount === acc.id}
+                              onChange={() => setSelectedMetaAccount(acc.id)}
+                              className="accent-pink-500" />
+                            <span className="text-white text-sm">{acc.name}</span>
+                            <span className="text-slate-500 text-xs">{acc.id}</span>
+                          </label>
+                        ))}
+                      </div>
+                    ) : <p className="text-slate-500 text-sm">Nenhuma conta encontrada</p>}
+                  </div>
+                  <div className="flex gap-3">
+                    <Button onClick={() => { if (!selectedMetaAccount) { toast.error("Selecione uma conta"); return; } syncMeta.mutate({ accountId: selectedMetaAccount }); }}
+                      disabled={syncMeta.isPending || !selectedMetaAccount}
+                      className="flex-1 bg-pink-600 hover:bg-pink-700 text-white">
+                      {syncMeta.isPending ? <Loader2 className="animate-spin mr-2" size={16} /> : <RefreshCw size={16} className="mr-2" />}
+                      Sincronizar Selecionada
+                    </Button>
+                    <Button onClick={() => syncMeta.mutate({})} disabled={syncMeta.isPending}
+                      variant="outline" className="border-slate-600 text-slate-300 hover:bg-slate-700">
+                      {syncMeta.isPending ? <Loader2 className="animate-spin" size={16} /> : "Todas"}
+                    </Button>
+                  </div>
+                  <Button onClick={() => window.location.href = "/api/auth/meta/login"}
+                    variant="outline" size="sm" className="w-full border-slate-600 text-slate-400 hover:bg-slate-700">
+                    Reconectar / Atualizar token
                   </Button>
-                )}
-              </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
+
         <TabsContent value="google">
           <Card className="bg-slate-800 border-slate-700">
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle className="text-white flex items-center gap-2"><Key className="text-cyan-500" size={18} />Google Ads</CardTitle>
-                {googleCreds?.connected && <span className="flex items-center gap-1.5 text-green-400 text-sm"><CheckCircle size={14} />Conectado</span>}
+                <CardTitle className="text-white flex items-center gap-2">
+                  <div className="w-5 h-5 rounded bg-white flex items-center justify-center text-xs font-bold text-red-500">G</div>
+                  Google Ads
+                </CardTitle>
+                {googleCreds?.connected
+                  ? <span className="flex items-center gap-1.5 text-green-400 text-sm"><CheckCircle size={14} />Conectado</span>
+                  : <span className="flex items-center gap-1.5 text-slate-500 text-sm"><AlertCircle size={14} />Não conectado</span>}
               </div>
-              <CardDescription className="text-slate-400">Configure seu Access Token do Google Ads</CardDescription>
+              <CardDescription className="text-slate-400">Conecte via OAuth para sincronizar suas campanhas do Google Ads</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="bg-slate-700/50 border border-slate-600 rounded-lg p-3 text-sm text-slate-300">
-                <p className="font-medium mb-1">Como obter:</p>
-                <ol className="list-decimal list-inside space-y-0.5 text-slate-400">
-                  <li>Acesse <a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">console.cloud.google.com</a></li>
-                  <li>Habilite a Google Ads API</li>
-                  <li>Crie credenciais OAuth 2.0 e gere os tokens</li>
-                </ol>
-              </div>
-              <div><Label className="text-slate-300">Access Token</Label><Input type="password" value={googleToken} onChange={e => setGoogleToken(e.target.value)} className="bg-slate-700 border-slate-600 text-white mt-1.5" /></div>
-              <div><Label className="text-slate-300">Refresh Token (opcional)</Label><Input type="password" value={googleRefresh} onChange={e => setGoogleRefresh(e.target.value)} className="bg-slate-700 border-slate-600 text-white mt-1.5" /></div>
-              <Button onClick={() => { if (!googleToken) return toast.error("Informe o Access Token"); saveGoogle.mutate({ platform: "google", accessToken: googleToken, refreshToken: googleRefresh || undefined }); }}
-                disabled={!googleToken || saveGoogle.isPending} className="w-full bg-cyan-600 hover:bg-cyan-700 text-white">
-                {saveGoogle.isPending ? <Loader2 className="animate-spin mr-2" size={16} /> : null} Salvar Credenciais
-              </Button>
+              {!googleCreds?.connected ? (
+                <Button onClick={() => window.location.href = "/api/auth/google-ads/login"}
+                  className="w-full bg-red-600 hover:bg-red-700 text-white">
+                  <Link size={16} className="mr-2" /> Conectar Google Ads
+                </Button>
+              ) : (
+                <div className="space-y-4">
+                  {loadingGoogleAccounts ? (
+                    <div className="flex items-center gap-2 text-slate-400 text-sm p-3">
+                      <Loader2 className="animate-spin" size={16} /> Carregando contas...
+                    </div>
+                  ) : (
+                    <div className="bg-slate-700/50 rounded-lg p-3">
+                      <p className="text-slate-300 text-sm font-medium mb-2">Contas disponíveis ({googleAccounts.length})</p>
+                      {googleAccounts.length > 0 ? (
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                          {googleAccounts.map((acc: any) => (
+                            <label key={acc.id} className="flex items-center gap-2 cursor-pointer">
+                              <input type="radio" name="googleAccount" value={acc.id}
+                                checked={selectedGoogleAccount === acc.id}
+                                onChange={() => setSelectedGoogleAccount(acc.id)}
+                                className="accent-cyan-500" />
+                              <span className="text-white text-sm">{acc.name}</span>
+                              <span className="text-slate-500 text-xs">{acc.id}</span>
+                            </label>
+                          ))}
+                        </div>
+                      ) : <p className="text-slate-500 text-sm">Nenhuma conta encontrada</p>}
+                    </div>
+                  )}
+                  <Button onClick={() => { if (!selectedGoogleAccount) { toast.error("Selecione uma conta"); return; } syncGoogle.mutate({ customerId: selectedGoogleAccount }); }}
+                    disabled={syncGoogle.isPending || !selectedGoogleAccount}
+                    className="w-full bg-cyan-600 hover:bg-cyan-700 text-white">
+                    {syncGoogle.isPending ? <Loader2 className="animate-spin mr-2" size={16} /> : <RefreshCw size={16} className="mr-2" />}
+                    Sincronizar Conta Selecionada
+                  </Button>
+                  <Button onClick={() => window.location.href = "/api/auth/google-ads/login"}
+                    variant="outline" size="sm" className="w-full border-slate-600 text-slate-400 hover:bg-slate-700">
+                    Reconectar / Atualizar token
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
+
         <TabsContent value="alerts">
           <Card className="bg-slate-800 border-slate-700 mb-4">
             <CardHeader>
@@ -169,3 +256,17 @@ export default function Settings() {
     </DashboardLayout>
   );
 }
+```
+
+---
+
+## ⚠️ Antes do deploy — adicione no Render
+```
+META_APP_ID=1748220689689304
+META_APP_SECRET=6c5421fc9134212b96096e5a4b6f5eb8
+GOOGLE_API_KEY=-ENtyxwHVbD-iWslE05clQ
+```
+
+E adicione no Google Cloud Console → Credenciais OAuth → URIs de redirecionamento autorizados:
+```
+https://marketing-suite.onrender.com/api/auth/google-ads/callback
