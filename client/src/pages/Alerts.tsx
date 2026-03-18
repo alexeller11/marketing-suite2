@@ -59,11 +59,3 @@ export default function Alerts() {
   );
 }
 ```
-
----
-
-## ✅ Checklist final após os commits
-
-Depois de subir tudo no GitHub, adicione no Render uma variável nova:
-```
-JWT_SECRET=marketing-suite-jwt-2026
