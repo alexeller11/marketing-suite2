@@ -69,7 +69,7 @@ export function getGoogleAuthUrl(redirectUri: string): string {
     access_type: 'offline',
     scope: scopes,
     redirect_uri: redirectUri,
-    state: Buffer.from(redirectUri).toString('base64'),
+    state: Buffer.from('/').toString('base64'),
   });
 }
 
