@@ -9,6 +9,8 @@ import { saveIntegrationCredentials, getIntegrationCredentials } from './db';
 const router = Router();
 const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
 async function getUserFromCookie(req: Request) {
   const cookies = req.headers.cookie
     ? Object.fromEntries(req.headers.cookie.split('; ').map(c => {
@@ -26,6 +28,8 @@ async function getUserFromCookie(req: Request) {
     return null;
   }
 }
+
+// ─── Google Login ─────────────────────────────────────────────────────────────
 
 router.get('/google/login', (req: Request, res: Response) => {
   const redirectUri = `${APP_URL}/api/auth/google/callback`;
@@ -61,6 +65,8 @@ router.get('/google/callback', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Authentication failed' });
   }
 });
+
+// ─── Google Ads OAuth ─────────────────────────────────────────────────────────
 
 router.get('/google-ads/login', async (req: Request, res: Response) => {
   const user = await getUserFromCookie(req);
@@ -101,7 +107,7 @@ router.get('/google-ads/callback', async (req: Request, res: Response) => {
       platform: 'google',
       accessToken: tokens.access_token || '',
       refreshToken: tokens.refresh_token || '',
-      metadata: { scope: tokens.scope },
+      metadata: { scope: tokens.scope, tokenType: tokens.token_type },
       isActive: true,
     });
     res.redirect(`${APP_URL}/settings?success=google_ads_connected`);
@@ -111,12 +117,14 @@ router.get('/google-ads/callback', async (req: Request, res: Response) => {
   }
 });
 
+// ─── Meta OAuth ───────────────────────────────────────────────────────────────
+
 router.get('/meta/login', async (req: Request, res: Response) => {
   const user = await getUserFromCookie(req);
   if (!user) return res.redirect(`${APP_URL}/login`);
   const appId = process.env.META_APP_ID;
   const redirectUri = encodeURIComponent(`${APP_URL}/api/auth/meta/callback`);
-  const scope = encodeURIComponent('ads_read,business_management');
+  const scope = encodeURIComponent('ads_read,ads_management,business_management,read_insights');
   const stateParam = encodeURIComponent(Buffer.from(String(user.userId)).toString('base64'));
   const url = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=${scope}&state=${stateParam}&response_type=code`;
   res.redirect(url);
@@ -131,14 +139,17 @@ router.get('/meta/callback', async (req: Request, res: Response) => {
     const appId = process.env.META_APP_ID;
     const appSecret = process.env.META_APP_SECRET;
     const redirectUri = `${APP_URL}/api/auth/meta/callback`;
+    // Trocar code por token
     const tokenRes = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
       params: { client_id: appId, client_secret: appSecret, redirect_uri: redirectUri, code },
     });
     const shortToken = tokenRes.data.access_token;
+    // Trocar por long-lived token
     const longTokenRes = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
       params: { grant_type: 'fb_exchange_token', client_id: appId, client_secret: appSecret, fb_exchange_token: shortToken },
     });
     const longToken = longTokenRes.data.access_token;
+    // Buscar ad accounts disponíveis
     const accountsRes = await axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
       params: { access_token: longToken, fields: 'id,name,account_status,currency' },
     });
@@ -157,6 +168,8 @@ router.get('/meta/callback', async (req: Request, res: Response) => {
   }
 });
 
+// ─── Meta Ad Accounts ─────────────────────────────────────────────────────────
+
 router.get('/meta/accounts', async (req: Request, res: Response) => {
   const user = await getUserFromCookie(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
@@ -172,6 +185,8 @@ router.get('/meta/accounts', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to fetch accounts' });
   }
 });
+
+// ─── Google Ads Accounts ──────────────────────────────────────────────────────
 
 router.get('/google-ads/accounts', async (req: Request, res: Response) => {
   const user = await getUserFromCookie(req);
@@ -206,6 +221,8 @@ router.get('/google-ads/accounts', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to fetch accounts' });
   }
 });
+
+// ─── Logout ───────────────────────────────────────────────────────────────────
 
 router.post('/logout', (req: Request, res: Response) => {
   const cookieOptions = getSessionCookieOptions(req);
