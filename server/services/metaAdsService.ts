@@ -1,10 +1,16 @@
 import axios from "axios";
 
 const META_API_VERSION = "v18.0";
-const META_API_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
+const BASE = `https://graph.facebook.com/${META_API_VERSION}`;
+
+export interface MetaAdAccount {
+  id: string; name: string; account_status: number; currency: string;
+  business?: { id: string; name: string };
+  amount_spent?: string;
+}
 
 export interface MetaCampaign {
-  id: string; name: string; status: string;
+  id: string; name: string; status: string; objective?: string;
   daily_budget?: number; lifetime_budget?: number;
   start_time?: string; stop_time?: string;
 }
@@ -12,32 +18,98 @@ export interface MetaCampaign {
 class MetaAdsService {
   constructor(private accessToken: string) {}
 
+  // Busca TODAS as ad accounts com paginação
+  async getAllAdAccounts(): Promise<MetaAdAccount[]> {
+    const accounts: MetaAdAccount[] = [];
+    let url = `${BASE}/me/adaccounts`;
+    let params: any = {
+      access_token: this.accessToken,
+      fields: "id,name,account_status,currency,business,amount_spent",
+      limit: 100,
+    };
+    while (url) {
+      const res = await axios.get(url, { params });
+      accounts.push(...(res.data.data || []));
+      url = res.data.paging?.next || null;
+      params = {}; // next já tem os params na URL
+    }
+    return accounts;
+  }
+
+  // Busca Business Managers do usuário
+  async getBusinessManagers(): Promise<any[]> {
+    try {
+      const res = await axios.get(`${BASE}/me/businesses`, {
+        params: { access_token: this.accessToken, fields: "id,name,profile_picture_uri" },
+      });
+      return res.data.data || [];
+    } catch { return []; }
+  }
+
+  // Busca ad accounts de um Business Manager
+  async getBusinessAdAccounts(businessId: string): Promise<MetaAdAccount[]> {
+    const accounts: MetaAdAccount[] = [];
+    let url = `${BASE}/${businessId}/owned_ad_accounts`;
+    let params: any = {
+      access_token: this.accessToken,
+      fields: "id,name,account_status,currency,amount_spent",
+      limit: 100,
+    };
+    while (url) {
+      const res = await axios.get(url, { params });
+      accounts.push(...(res.data.data || []));
+      url = res.data.paging?.next || null;
+      params = {};
+    }
+    return accounts;
+  }
+
   async getCampaigns(accountId: string): Promise<MetaCampaign[]> {
-    const response = await axios.get(`${META_API_BASE_URL}/${accountId}/campaigns`, {
-      params: { access_token: this.accessToken, fields: "id,name,status,daily_budget,lifetime_budget,start_time,stop_time" },
-    });
-    return response.data.data || [];
+    const campaigns: MetaCampaign[] = [];
+    let url = `${BASE}/${accountId}/campaigns`;
+    let params: any = {
+      access_token: this.accessToken,
+      fields: "id,name,status,objective,daily_budget,lifetime_budget,start_time,stop_time",
+      limit: 100,
+    };
+    while (url) {
+      const res = await axios.get(url, { params });
+      campaigns.push(...(res.data.data || []));
+      url = res.data.paging?.next || null;
+      params = {};
+    }
+    return campaigns;
   }
 
-  async getCampaignInsights(campaignId: string): Promise<any> {
-    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
-    const until = new Date().toISOString().split("T")[0];
-    const response = await axios.get(`${META_API_BASE_URL}/${campaignId}/insights`, {
-      params: { access_token: this.accessToken, fields: "spend,impressions,clicks,ctr,cpc,actions,action_values", time_range: JSON.stringify({ since, until }) },
-    });
-    return response.data.data || [];
+  async getCampaignInsights(campaignId: string, datePreset: string = "last_30d"): Promise<any> {
+    try {
+      const res = await axios.get(`${BASE}/${campaignId}/insights`, {
+        params: {
+          access_token: this.accessToken,
+          fields: "spend,impressions,clicks,reach,ctr,cpc,cpm,frequency,actions,action_values,cost_per_action_type",
+          date_preset: datePreset,
+        },
+      });
+      return res.data.data?.[0] || null;
+    } catch { return null; }
   }
 
-  async refreshAccessToken(appId: string, appSecret: string, fbExchangeToken: string): Promise<string> {
-    const response = await axios.get(`${META_API_BASE_URL}/oauth/access_token`, {
-      params: { grant_type: "fb_exchange_token", client_id: appId, client_secret: appSecret, fb_exchange_token: fbExchangeToken },
-    });
-    return response.data.access_token;
+  async getAccountInsights(accountId: string, datePreset: string = "last_30d"): Promise<any> {
+    try {
+      const res = await axios.get(`${BASE}/${accountId}/insights`, {
+        params: {
+          access_token: this.accessToken,
+          fields: "spend,impressions,clicks,reach,ctr,cpc,cpm,frequency,actions,action_values",
+          date_preset: datePreset,
+          level: "account",
+        },
+      });
+      return res.data.data?.[0] || null;
+    } catch { return null; }
   }
 }
 
 export function createMetaAdsService(accessToken?: string): MetaAdsService {
   return new MetaAdsService(accessToken || process.env.META_ACCESS_TOKEN || "");
 }
-
 export default MetaAdsService;
