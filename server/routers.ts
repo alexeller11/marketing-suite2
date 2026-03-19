@@ -5,13 +5,15 @@ import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { z } from "zod";
 import {
   getCampaignsByUserId, createCampaign, updateCampaign,
+  getClientsByUserId, upsertClient, updateClient, getClientStats,
+  getAdAccountsByUserId, upsertAdAccount, setAdAccountSelected, assignAdAccountToClient,
   getBudgetAlertsByUserId, createBudgetAlert, deleteBudgetAlert, checkBudgetAlerts,
   getIntegrationCredentials, saveIntegrationCredentials,
   getDashboardStats, getCampaignHistory, saveCampaignSnapshot,
-  saveAiAnalysis, getAiAnalysesByUser
+  saveAiAnalysis, getAiAnalysesByUser, getAiAnalysesByClient
 } from "./db";
 import { createGroqService } from "./services/groqService";
-import { syncAllMetaAccounts, syncMetaCampaigns, syncGoogleAdsCampaigns } from "./services/syncService";
+import { syncMetaStructure, syncMetaCampaigns, syncSelectedAccounts, syncGoogleAdsCampaigns } from "./services/syncService";
 
 export const appRouter = router({
   system: systemRouter,
@@ -19,8 +21,7 @@ export const appRouter = router({
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
-      const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      ctx.res.clearCookie(COOKIE_NAME, { ...getSessionCookieOptions(ctx.req), maxAge: -1 });
       return { success: true } as const;
     }),
   }),
@@ -34,19 +35,81 @@ export const appRouter = router({
       }),
   }),
 
-  campaigns: router({
+  clients: router({
     list: protectedProcedure.query(async ({ ctx }) => {
       if (!ctx.user) throw new Error("Unauthorized");
-      return getCampaignsByUserId(ctx.user.id);
+      return getClientsByUserId(ctx.user.id);
     }),
-    create: protectedProcedure
-      .input(z.object({ name: z.string(), platform: z.enum(["meta", "google", "instagram"]), externalId: z.string(), budget: z.number().optional() }))
-      .mutation(async ({ ctx, input }) => {
+    stats: protectedProcedure
+      .input(z.object({ days: z.number().default(30) }))
+      .query(async ({ ctx, input }) => {
         if (!ctx.user) throw new Error("Unauthorized");
-        return createCampaign({ userId: ctx.user.id, ...input });
+        return getClientStats(ctx.user.id, input.days);
+      }),
+    get: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ ctx, input }) => {
+        if (!ctx.user) throw new Error("Unauthorized");
+        const clients = await getClientsByUserId(ctx.user.id);
+        return clients.find(c => c.id === input.id) || null;
       }),
     update: protectedProcedure
-      .input(z.object({ id: z.number(), name: z.string().optional(), status: z.enum(["active", "paused", "completed", "draft"]).optional(), budget: z.number().optional(), spent: z.number().optional(), impressions: z.number().optional(), clicks: z.number().optional(), conversions: z.number().optional(), ctr: z.number().optional(), cpc: z.number().optional(), roi: z.number().optional() }))
+      .input(z.object({
+        id: z.number(),
+        name: z.string().optional(),
+        monthlyBudget: z.number().optional(),
+        paymentMethod: z.string().optional(),
+        notes: z.string().optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (!ctx.user) throw new Error("Unauthorized");
+        const { id, ...data } = input;
+        return updateClient(id, ctx.user.id, data as any);
+      }),
+    campaigns: protectedProcedure
+      .input(z.object({ clientId: z.number(), status: z.string().optional(), days: z.number().default(30) }))
+      .query(async ({ ctx, input }) => {
+        if (!ctx.user) throw new Error("Unauthorized");
+        return getCampaignsByUserId(ctx.user.id, { clientId: input.clientId, status: input.status });
+      }),
+    aiHistory: protectedProcedure
+      .input(z.object({ clientId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        if (!ctx.user) throw new Error("Unauthorized");
+        return getAiAnalysesByClient(input.clientId);
+      }),
+  }),
+
+  adAccounts: router({
+    list: protectedProcedure.query(async ({ ctx }) => {
+      if (!ctx.user) throw new Error("Unauthorized");
+      return getAdAccountsByUserId(ctx.user.id);
+    }),
+    setSelected: protectedProcedure
+      .input(z.object({ id: z.number(), selected: z.boolean() }))
+      .mutation(async ({ ctx, input }) => {
+        if (!ctx.user) throw new Error("Unauthorized");
+        await setAdAccountSelected(input.id, ctx.user.id, input.selected);
+        return { success: true };
+      }),
+    assignClient: protectedProcedure
+      .input(z.object({ adAccountId: z.number(), clientId: z.number().nullable() }))
+      .mutation(async ({ ctx, input }) => {
+        if (!ctx.user) throw new Error("Unauthorized");
+        await assignAdAccountToClient(input.adAccountId, input.clientId, ctx.user.id);
+        return { success: true };
+      }),
+  }),
+
+  campaigns: router({
+    list: protectedProcedure
+      .input(z.object({ clientId: z.number().optional(), status: z.string().optional(), adAccountId: z.number().optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        if (!ctx.user) throw new Error("Unauthorized");
+        return getCampaignsByUserId(ctx.user.id, input);
+      }),
+    update: protectedProcedure
+      .input(z.object({ id: z.number(), status: z.enum(["active", "paused", "completed", "draft"]).optional(), budget: z.number().optional() }))
       .mutation(async ({ ctx, input }) => {
         if (!ctx.user) throw new Error("Unauthorized");
         const { id, ...data } = input;
@@ -58,26 +121,23 @@ export const appRouter = router({
         if (!ctx.user) throw new Error("Unauthorized");
         return getCampaignHistory(input.campaignId, input.days);
       }),
-    snapshot: protectedProcedure
-      .input(z.object({ campaignId: z.number() }))
-      .mutation(async ({ ctx, input }) => {
-        if (!ctx.user) throw new Error("Unauthorized");
-        const campaigns = await getCampaignsByUserId(ctx.user.id);
-        const campaign = campaigns.find(c => c.id === input.campaignId);
-        if (!campaign) throw new Error("Campanha não encontrada");
-        await saveCampaignSnapshot(campaign.id, { spent: campaign.spent, impressions: campaign.impressions, clicks: campaign.clicks, conversions: campaign.conversions, ctr: campaign.ctr, cpc: campaign.cpc, roi: campaign.roi });
-        return { success: true };
-      }),
   }),
 
   sync: router({
-    meta: protectedProcedure
-      .input(z.object({ accountId: z.string().optional() }))
+    metaStructure: protectedProcedure.mutation(async ({ ctx }) => {
+      if (!ctx.user) throw new Error("Unauthorized");
+      return syncMetaStructure(ctx.user.id);
+    }),
+    metaAccount: protectedProcedure
+      .input(z.object({ accountId: z.string() }))
       .mutation(async ({ ctx, input }) => {
         if (!ctx.user) throw new Error("Unauthorized");
-        if (input.accountId) return syncMetaCampaigns(ctx.user.id, input.accountId);
-        return syncAllMetaAccounts(ctx.user.id);
+        return syncMetaCampaigns(ctx.user.id, input.accountId);
       }),
+    metaSelected: protectedProcedure.mutation(async ({ ctx }) => {
+      if (!ctx.user) throw new Error("Unauthorized");
+      return syncSelectedAccounts(ctx.user.id);
+    }),
     google: protectedProcedure
       .input(z.object({ customerId: z.string() }))
       .mutation(async ({ ctx, input }) => {
@@ -88,9 +148,9 @@ export const appRouter = router({
       if (!ctx.user) throw new Error("Unauthorized");
       const meta = await getIntegrationCredentials(ctx.user.id, "meta");
       const google = await getIntegrationCredentials(ctx.user.id, "google");
-      const metaAccounts = (meta?.metadata as any)?.adAccounts || [];
+      const accounts = await getAdAccountsByUserId(ctx.user.id);
       return {
-        meta: { connected: !!meta?.accessToken, accounts: metaAccounts },
+        meta: { connected: !!meta?.accessToken, selectedAccounts: accounts.filter(a => a.isSelected && a.platform === "meta").length },
         google: { connected: !!google?.accessToken },
       };
     }),
@@ -102,7 +162,7 @@ export const appRouter = router({
       return getBudgetAlertsByUserId(ctx.user.id);
     }),
     create: protectedProcedure
-      .input(z.object({ campaignId: z.number().optional(), threshold: z.number().min(1).max(100) }))
+      .input(z.object({ campaignId: z.number().optional(), clientId: z.number().optional(), threshold: z.number().min(1).max(100) }))
       .mutation(async ({ ctx, input }) => {
         if (!ctx.user) throw new Error("Unauthorized");
         return createBudgetAlert({ userId: ctx.user.id, ...input });
@@ -126,10 +186,7 @@ export const appRouter = router({
       .query(async ({ ctx, input }) => {
         if (!ctx.user) throw new Error("Unauthorized");
         const creds = await getIntegrationCredentials(ctx.user.id, input);
-        const metaAccounts = input === "meta" ? (creds?.metadata as any)?.adAccounts || [] : [];
-        return creds
-          ? { connected: true, platform: input, updatedAt: creds.updatedAt, adAccounts: metaAccounts }
-          : { connected: false, platform: input, adAccounts: [] };
+        return creds ? { connected: true, platform: input, updatedAt: creds.updatedAt } : { connected: false, platform: input };
       }),
     saveCredentials: protectedProcedure
       .input(z.object({ platform: z.enum(["meta", "google", "instagram"]), accessToken: z.string().optional(), refreshToken: z.string().optional(), accountId: z.string().optional(), metadata: z.record(z.string(), z.any()).optional() }))
@@ -140,22 +197,87 @@ export const appRouter = router({
   }),
 
   ai: router({
+    analyzeClient: protectedProcedure
+      .input(z.object({
+        clientId: z.number(),
+        period: z.string().default("últimos 30 dias"),
+        days: z.number().default(30),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        if (!ctx.user) throw new Error("Unauthorized");
+        const clients = await getClientsByUserId(ctx.user.id);
+        const client = clients.find(c => c.id === input.clientId);
+        if (!client) throw new Error("Cliente não encontrado");
+        const campaigns = await getCampaignsByUserId(ctx.user.id, { clientId: input.clientId });
+        const totalSpent = campaigns.reduce((s, c) => s + parseFloat(c.spent?.toString() || "0"), 0);
+        const groq = createGroqService();
+        const analysis = await groq.analyzeClientFull({
+          clientName: client.name,
+          platform: client.platform,
+          period: input.period,
+          totalSpent,
+          monthlyBudget: parseFloat(client.monthlyBudget?.toString() || "0"),
+          campaigns: campaigns.map(c => ({
+            name: c.name,
+            status: c.status,
+            metrics: {
+              spent: parseFloat(c.spent?.toString() || "0"),
+              impressions: c.impressions || 0,
+              clicks: c.clicks || 0,
+              conversions: c.conversions || 0,
+              reach: c.reach || 0,
+              ctr: parseFloat(c.ctr?.toString() || "0"),
+              cpc: parseFloat(c.cpc?.toString() || "0"),
+              cpm: parseFloat(c.cpm?.toString() || "0"),
+              roas: parseFloat(c.roas?.toString() || "0"),
+              frequency: parseFloat(c.frequency?.toString() || "0"),
+              costPerResult: parseFloat(c.costPerResult?.toString() || "0"),
+            },
+          })),
+        });
+        await saveAiAnalysis({
+          userId: ctx.user.id,
+          clientId: input.clientId,
+          type: "client",
+          prompt: `Análise completa: ${client.name}`,
+          analysis: analysis.analysis,
+          recommendations: [...analysis.recommendations, ...analysis.optimizations],
+          score: analysis.score,
+        });
+        return analysis;
+      }),
+
     analyzeCampaign: protectedProcedure
-      .input(z.object({ campaignName: z.string(), campaignId: z.number().optional(), platform: z.string(), metrics: z.object({ spent: z.number(), impressions: z.number(), clicks: z.number(), conversions: z.number(), ctr: z.number(), cpc: z.number(), roi: z.number() }) }))
+      .input(z.object({
+        campaignName: z.string(),
+        campaignId: z.number().optional(),
+        clientId: z.number().optional(),
+        platform: z.string(),
+        metrics: z.object({
+          spent: z.number(), impressions: z.number(), clicks: z.number(),
+          conversions: z.number(), reach: z.number().default(0),
+          ctr: z.number(), cpc: z.number(), cpm: z.number().default(0),
+          roas: z.number().default(0), frequency: z.number().default(0),
+          costPerResult: z.number().default(0),
+        }),
+      }))
       .mutation(async ({ ctx, input }) => {
         if (!ctx.user) throw new Error("Unauthorized");
         const groq = createGroqService();
         const analysis = await groq.analyzeCampaign(input);
-        await saveAiAnalysis({ userId: ctx.user.id, campaignId: input.campaignId, prompt: `${input.campaignName} - ${input.platform}`, analysis: analysis.analysis, recommendations: analysis.recommendations });
+        await saveAiAnalysis({
+          userId: ctx.user.id,
+          clientId: input.clientId,
+          campaignId: input.campaignId,
+          type: "campaign",
+          prompt: `${input.campaignName} - ${input.platform}`,
+          analysis: analysis.analysis,
+          recommendations: [...analysis.recommendations, ...analysis.optimizations],
+          score: analysis.score,
+        });
         return analysis;
       }),
-    getRecommendations: protectedProcedure
-      .input(z.object({ campaignName: z.string(), metrics: z.object({ spent: z.number(), impressions: z.number(), clicks: z.number(), conversions: z.number(), ctr: z.number(), cpc: z.number(), roi: z.number() }) }))
-      .query(async ({ ctx, input }) => {
-        if (!ctx.user) throw new Error("Unauthorized");
-        const groq = createGroqService();
-        return groq.generateOptimizationRecommendations(input.campaignName, input.metrics);
-      }),
+
     history: protectedProcedure
       .input(z.object({ limit: z.number().default(10) }))
       .query(async ({ ctx, input }) => {
