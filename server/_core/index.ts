@@ -1,59 +1,49 @@
-import "dotenv/config";
-import express from "express";
-import { createServer } from "http";
-import net from "net";
-import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import authRoutes from "../auth-routes";
-import { appRouter } from "../routers";
-import { createContext } from "./context";
-import { serveStatic, setupVite } from "./vite";
+import express, { type Request, Response, NextFunction } from "express";
+import path from "path";
+import { fileURLToPath } from "url";
 
-function isPortAvailable(port: number): Promise<boolean> {
-  return new Promise(resolve => {
-    const server = net.createServer();
-    server.listen(port, () => {
-      server.close(() => resolve(true));
-    });
-    server.on("error", () => resolve(false));
+// --- SEUS IMPORTS DE ROTAS AQUI ---
+// Exemplo: import { apiRouter } from "./routes"; 
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+
+// Middlewares básicos
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+
+// --- SUAS ROTAS AQUI ---
+// app.use("/api", apiRouter);
+
+/**
+ * CONFIGURAÇÃO PARA DEPLOY (Vite + Express)
+ * Isso garante que o Express sirva os arquivos do Front-end após o build
+ */
+if (process.env.NODE_ENV === "production") {
+  // Caminho para a pasta 'dist/public' onde o Vite coloca o build do front
+  const publicPath = path.resolve(__dirname, "public");
+  
+  app.use(express.static(publicPath));
+
+  // Qualquer rota que não seja da API, serve o index.html (SPA)
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(publicPath, "index.html"));
+  });
+} else {
+  // Rota de fallback para desenvolvimento
+  app.get("/", (_req, res) => {
+    res.send("Server is running in development mode...");
   });
 }
 
-async function findAvailablePort(startPort: number = 3000): Promise<number> {
-  for (let port = startPort; port < startPort + 20; port++) {
-    if (await isPortAvailable(port)) {
-      return port;
-    }
-  }
-  throw new Error(`No available port found starting from ${startPort}`);
-}
+/**
+ * INICIALIZAÇÃO DO SERVIDOR
+ * Essencial para o Render: Porta dinâmica e Host 0.0.0.0
+ */
+const PORT = Number(process.env.PORT) || 5000;
 
-async function startServer() {
-  const app = express();
-  const server = createServer(app);
-  app.use(express.json({ limit: "50mb" }));
-  app.use(express.urlencoded({ limit: "50mb", extended: true }));
-  // Google OAuth routes (standalone, no Manus)
-  app.use('/api/auth', authRoutes);
-  app.use(
-    "/api/trpc",
-    createExpressMiddleware({
-      router: appRouter,
-      createContext,
-    })
-  );
-  if (process.env.NODE_ENV === "development") {
-    await setupVite(app, server);
-  } else {
-    serveStatic(app);
-  }
-  const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
-  if (port !== preferredPort) {
-    console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
-  }
-  server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
-  });
-}
-
-startServer().catch(console.error);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server ready on port ${PORT}`);
+});
