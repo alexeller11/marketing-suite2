@@ -116,7 +116,7 @@ router.get('/meta/login', async (req: Request, res: Response) => {
   if (!user) return res.redirect(`${APP_URL}/login`);
   const appId = process.env.META_APP_ID;
   const redirectUri = encodeURIComponent(`${APP_URL}/api/auth/meta/callback`);
-  const scope = encodeURIComponent('ads_read,ads_management,business_management,read_insights');
+  const scope = encodeURIComponent('ads_read,business_management');
   const stateParam = encodeURIComponent(Buffer.from(String(user.userId)).toString('base64'));
   const url = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=${scope}&state=${stateParam}&response_type=code`;
   res.redirect(url);
