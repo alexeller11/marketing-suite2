@@ -4,7 +4,8 @@ import NotFound from "@/pages/NotFound";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import Settings from "@/pages/Settings";
-import AIPlanner from "@/pages/AIPlanner";
+import Clients from "@/pages/Clients";
+import ClientDetail from "@/pages/ClientDetail";
 import Campaigns from "@/pages/Campaigns";
 import Alerts from "@/pages/Alerts";
 import { Route, Switch } from "wouter";
@@ -17,9 +18,10 @@ function Router() {
       <Route path="/login" component={Login} />
       <Route path="/" component={Dashboard} />
       <Route path="/dashboard" component={Dashboard} />
+      <Route path="/clients" component={Clients} />
+      <Route path="/clients/:id" component={ClientDetail} />
       <Route path="/campaigns" component={Campaigns} />
       <Route path="/settings" component={Settings} />
-      <Route path="/ai-planner" component={AIPlanner} />
       <Route path="/alerts" component={Alerts} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
