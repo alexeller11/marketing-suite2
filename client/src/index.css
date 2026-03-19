@@ -1,14 +1,44 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Marketing Suite</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  </head>
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-  <body>
-    <div id="root"></div>
+/* ================= BASE ================= */
 
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
+:root {
+  --radius: 0.65rem;
+}
+
+body {
+  @apply bg-white text-black;
+}
+
+/* DARK MODE */
+
+.dark body {
+  @apply bg-neutral-900 text-white;
+}
+
+/* ================= COMPONENTS ================= */
+
+.container {
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+@media (min-width: 640px) {
+  .container {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .container {
+    padding-left: 2rem;
+    padding-right: 2rem;
+    max-width: 1280px;
+  }
+}
