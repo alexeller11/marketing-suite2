@@ -11,7 +11,9 @@ import Alerts from "@/pages/Alerts";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
-import { TRPCProvider } from "./lib/providers";
+
+// ✅ IMPORTANTE AQUI
+import { TrpcProvider } from "@/providers/TrpcProvider";
 
 function Router() {
   return (
@@ -33,14 +35,15 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      <TRPCProvider>
+      {/* 🔥 ENVOLVE TUDO COM TRPC */}
+      <TrpcProvider>
         <ThemeProvider defaultTheme="dark">
           <TooltipProvider>
             <Toaster />
             <Router />
           </TooltipProvider>
         </ThemeProvider>
-      </TRPCProvider>
+      </TrpcProvider>
     </ErrorBoundary>
   );
 }
