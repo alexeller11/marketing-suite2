@@ -1,10 +1,10 @@
-import { eq, and, desc, gte, sql } from "drizzle-orm";
+import { eq, and, desc, gte, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import {
   InsertUser, users, campaigns, budgetAlerts, integrationCredentials,
   aiAnalyses, campaignHistory, clients, adAccounts,
-  type Client, type AdAccount
+  type Client, type AdAccount, type Campaign
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -14,7 +14,6 @@ let _client: postgres.Sql | null = null;
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      // ✅ Correção SSL para o Render/Neon
       _client = postgres(process.env.DATABASE_URL, { ssl: 'require' });
       _db = drizzle(_client);
     } catch (error) {
@@ -28,8 +27,6 @@ export async function getDb() {
 export async function closeDb() {
   if (_client) { await _client.end(); _client = null; _db = null; }
 }
-
-// ─── Usuários ──────────────────────────────────────────────────────────────────
 
 export async function upsertUser(user: InsertUser): Promise<void> {
   if (!user.openId) throw new Error("User openId is required");
@@ -55,8 +52,6 @@ export async function getUserByOpenId(openId: string) {
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
   return result[0];
 }
-
-// ─── Clientes ──────────────────────────────────────────────────────────────────
 
 export async function getClientsByUserId(userId: number) {
   const db = await getDb();
@@ -85,8 +80,6 @@ export async function updateClient(id: number, userId: number, data: Partial<Cli
     .where(and(eq(clients.id, id), eq(clients.userId, userId))).returning();
   return result[0];
 }
-
-// ─── Contas de Anúncio ────────────────────────────────────────────────────────
 
 export async function getAdAccountsByUserId(userId: number) {
   const db = await getDb();
@@ -119,8 +112,6 @@ export async function assignAdAccountToClient(adAccountId: number, clientId: num
   if (!db) throw new Error("DB not available");
   await db.update(adAccounts).set({ clientId, updatedAt: new Date() }).where(and(eq(adAccounts.id, adAccountId), eq(adAccounts.userId, userId)));
 }
-
-// ─── Campanhas ────────────────────────────────────────────────────────────────
 
 export async function getCampaignsByUserId(userId: number, filters?: { clientId?: number; status?: string; adAccountId?: number }) {
   const db = await getDb();
@@ -158,8 +149,6 @@ export async function upsertCampaign(userId: number, data: any) {
   const result = await db.insert(campaigns).values({ ...data, userId, syncedAt: new Date() }).returning();
   return result[0];
 }
-
-// ─── Estatísticas e Histórico ──────────────────────────────────────────────────
 
 export async function getDashboardStats(userId: number, days: number = 30) {
   const db = await getDb();
@@ -216,8 +205,6 @@ export async function getCampaignHistory(campaignId: number, days: number = 30) 
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   return db.select().from(campaignHistory).where(and(eq(campaignHistory.campaignId, campaignId), gte(campaignHistory.recordedAt, since))).orderBy(desc(campaignHistory.recordedAt));
 }
-
-// ─── Alertas e Integração ──────────────────────────────────────────────────────
 
 export async function getBudgetAlertsByUserId(userId: number) {
   const db = await getDb();
@@ -276,8 +263,6 @@ export async function saveIntegrationCredentials(data: any) {
   const result = await db.insert(integrationCredentials).values(data).returning();
   return result[0];
 }
-
-// ─── Análises IA ──────────────────────────────────────────────────────────────
 
 export async function saveAiAnalysis(data: { userId: number; clientId?: number; campaignId?: number; type?: string; prompt: string; analysis: string; recommendations: any; score?: number }) {
   const db = await getDb();
