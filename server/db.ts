@@ -1,7 +1,7 @@
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
-      // Adicionamos { ssl: 'require' } para aceitar conexões do Render/Neon
+      // Adicionamos o objeto { ssl: 'require' } para o Neon/Render
       _client = postgres(process.env.DATABASE_URL, { ssl: 'require' });
       _db = drizzle(_client);
     } catch (error) {
