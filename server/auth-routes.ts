@@ -60,7 +60,7 @@ router.get('/google-ads/login', async (req: Request, res: Response) => {
   
   const url = client.generateAuthUrl({
     access_type: 'offline',
-    prompt: 'consent', // Força o Google a enviar a chave mestra sempre
+    prompt: 'consent', 
     scope: ['https://www.googleapis.com/auth/adwords', 'https://www.googleapis.com/auth/userinfo.email'],
     state: Buffer.from(String(user.userId)).toString('base64'),
   });
@@ -77,14 +77,12 @@ router.get('/google-ads/callback', async (req: Request, res: Response) => {
     const { OAuth2Client } = await import('google-auth-library');
     const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, `${baseUrl}/api/auth/google-ads/callback`);
     const { tokens } = await client.getToken(code as string);
-    
     const existingCreds = await getIntegrationCredentials(userId, 'google');
     
     await saveIntegrationCredentials({
       userId,
       platform: 'google',
       accessToken: tokens.access_token || '',
-      // Se o Google não enviar refreshToken agora, guardamos o que já tínhamos!
       refreshToken: tokens.refresh_token || existingCreds?.refreshToken || '',
       metadata: { scope: tokens.scope, tokenType: tokens.token_type },
       isActive: true,
@@ -93,7 +91,6 @@ router.get('/google-ads/callback', async (req: Request, res: Response) => {
   } catch (error) { res.redirect(`${baseUrl}/settings?error=google_ads_failed`); }
 });
 
-// ─── Puxar Contas do Google Ads ───────────────────────────────────────────────
 router.get('/google-ads/accounts', async (req: Request, res: Response) => {
   const user = await getUserFromCookie(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
@@ -102,43 +99,42 @@ router.get('/google-ads/accounts', async (req: Request, res: Response) => {
     const creds = await getIntegrationCredentials(user.userId, 'google');
     if (!creds?.accessToken) return res.json({ accounts: [] });
     
-    const devToken = process.env.GOOGLE_API_KEY || '';
+    let accessToken = creds.accessToken;
+    try {
+      const { OAuth2Client } = await import('google-auth-library');
+      const oauthClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
+      oauthClient.setCredentials({ access_token: creds.accessToken, refresh_token: creds.refreshToken || undefined });
+      const { credentials } = await oauthClient.refreshAccessToken();
+      accessToken = credentials.access_token || accessToken;
+    } catch (tokenError) {
+      return res.json({ accounts: [], warning: "Sessão do Google expirou. Clique em Reconectar." });
+    }
     
-    // Conexão direta à API do Google Ads
+    const devToken = process.env.GOOGLE_API_KEY || '';
     try {
       const accountsRes = await axios.get(
         'https://googleads.googleapis.com/v17/customers:listAccessibleCustomers',
-        { headers: { Authorization: `Bearer ${creds.accessToken}`, 'developer-token': devToken } }
+        { headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': devToken } }
       );
-      
       const customerIds = accountsRes.data.resourceNames?.map((r: string) => r.replace('customers/', '')) || [];
       const accounts = [];
       for (const id of customerIds.slice(0, 20)) {
         try {
           const custRes = await axios.get(
             `https://googleads.googleapis.com/v17/customers/${id}`,
-            { headers: { Authorization: `Bearer ${creds.accessToken}`, 'developer-token': devToken } }
+            { headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': devToken } }
           );
           accounts.push({ id, name: custRes.data.descriptiveName || id, currency: custRes.data.currencyCode });
-        } catch (e) {} // Ignora falhas em clientes individuais
+        } catch (e) {} 
       }
       return res.json({ accounts });
-      
-    } catch (googleApiError: any) {
-      console.error('[Google Ads API Error]', googleApiError.response?.data || googleApiError.message);
-      // Retornar código 200 com array vazio evita que o frontend faça crash (Erro 500), mostrando apenas aviso na tela.
-      return res.json({ accounts: [], warning: googleApiError.response?.data?.error?.message || "Erro na Google API" });
+    } catch (apiError: any) {
+      return res.json({ accounts: [], warning: "API Google: " + (apiError.response?.data?.error?.message || apiError.message) });
     }
   } catch (error) {
-    console.error('[Auth] Server error fetching Google accounts:', error);
-    res.status(500).json({ error: 'Failed to fetch accounts' });
+    res.status(500).json({ error: 'Failed to process accounts' });
   }
 });
-
-// ─── Outras Rotas ─────────────────────────────────────────────────────────────
-router.get('/meta/login', async (req: Request, res: Response) => { res.redirect('/settings'); });
-router.get('/meta/callback', async (req: Request, res: Response) => { res.redirect('/settings'); });
-router.get('/meta/accounts', async (req: Request, res: Response) => { res.json({ accounts: [] }); });
 
 router.post('/logout', (req: Request, res: Response) => {
   res.clearCookie(COOKIE_NAME, { ...getSessionCookieOptions(req), maxAge: -1 });
