@@ -12,7 +12,7 @@ import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 
-// ✅ IMPORTANTE AQUI
+// 👉 IMPORTANTE
 import { TrpcProvider } from "@/providers/TrpcProvider";
 
 function Router() {
@@ -35,15 +35,15 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      {/* 🔥 ENVOLVE TUDO COM TRPC */}
-      <TrpcProvider>
-        <ThemeProvider defaultTheme="dark">
+      <ThemeProvider defaultTheme="dark">
+        {/* ✅ AQUI ESTÁ A CORREÇÃO */}
+        <TrpcProvider>
           <TooltipProvider>
             <Toaster />
             <Router />
           </TooltipProvider>
-        </ThemeProvider>
-      </TrpcProvider>
+        </TrpcProvider>
+      </ThemeProvider>
     </ErrorBoundary>
   );
 }
