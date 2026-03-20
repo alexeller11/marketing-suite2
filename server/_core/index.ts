@@ -4,7 +4,6 @@ import { fileURLToPath } from "url";
 import http from "http";
 import * as trpcExpress from "@trpc/server/adapters/express";
 
-// Importações que ligam a sua lógica de negócio ao servidor
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import authRoutes from "../auth-routes";
@@ -15,14 +14,13 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Middlewares básicos para APIs
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-// 1. Registar rotas de autenticação (Google, Meta)
+// 1. Liga as rotas de Autenticação (Google, Meta)
 app.use("/api/auth", authRoutes);
 
-// 2. Registar o middleware do tRPC (Comunicação Frontend <-> Backend)
+// 2. Liga a API de dados (tRPC)
 app.use(
   "/api/trpc",
   trpcExpress.createExpressMiddleware({
@@ -31,20 +29,18 @@ app.use(
   })
 );
 
-// Rota de teste
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", message: "Server is running" });
+  res.json({ status: "ok", message: "Server is running on Render!" });
 });
 
-// 3. Inicialização do Servidor com suporte ao Vite
+// 3. Inicializa o servidor corretamente para o Render (Produção)
 async function startServer() {
   const server = http.createServer(app);
 
   if (process.env.NODE_ENV !== "production") {
-    // No modo de desenvolvimento, o Vite injeta o frontend na mesma porta (5000)
     await setupVite(app, server);
   } else {
-    // No modo de produção, serve os ficheiros estáticos gerados na pasta dist
+    // No Render, é isto que faz a sua interface gráfica (React) aparecer!
     serveStatic(app);
   }
 
