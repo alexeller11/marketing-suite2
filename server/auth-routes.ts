@@ -7,84 +7,61 @@ import axios from 'axios';
 import { saveIntegrationCredentials, getIntegrationCredentials } from './db';
 
 const router = Router();
-const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+function getBaseUrl(req: Request) {
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+  const host = req.get('host');
+  return `${protocol}://${host}`;
+}
 
 async function getUserFromCookie(req: Request) {
-  const cookies = req.headers.cookie
-    ? Object.fromEntries(req.headers.cookie.split('; ').map(c => {
-        const [k, ...v] = c.split('=');
-        return [k, v.join('=')];
-      }))
-    : {};
+  const cookies = req.headers.cookie ? Object.fromEntries(req.headers.cookie.split('; ').map(c => c.split('='))) : {};
   const sessionCookie = cookies[COOKIE_NAME];
   if (!sessionCookie) return null;
   try {
     const secret = new TextEncoder().encode(process.env.JWT_SECRET || 'secret');
     const { payload } = await jwtVerify(sessionCookie, secret, { algorithms: ['HS256'] });
     return payload as { sub: string; userId: number; email: string; name: string };
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 // ─── Google Login ─────────────────────────────────────────────────────────────
-
 router.get('/google/login', (req: Request, res: Response) => {
-  const redirectUri = `${APP_URL}/api/auth/google/callback`;
-  const authUrl = getGoogleAuthUrl(redirectUri);
-  res.json({ authUrl });
+  const redirectUri = `${getBaseUrl(req)}/api/auth/google/callback`;
+  res.json({ authUrl: getGoogleAuthUrl(redirectUri) });
 });
 
 router.get('/google/callback', async (req: Request, res: Response) => {
   const { code, state } = req.query;
   if (!code) return res.status(400).json({ error: 'Missing authorization code' });
   try {
-    const redirectUri = `${APP_URL}/api/auth/google/callback`;
+    const redirectUri = `${getBaseUrl(req)}/api/auth/google/callback`;
     const idToken = await exchangeCodeForToken(code as string, redirectUri);
-    if (!idToken) return res.status(401).json({ error: 'Failed to exchange code for token' });
+    if (!idToken) return res.status(401).json({ error: 'Failed to exchange code' });
     const user = await verifyGoogleToken(idToken);
     if (!user) return res.status(401).json({ error: 'Failed to verify token' });
+    
     const secret = new TextEncoder().encode(process.env.JWT_SECRET || 'secret');
-    const token = await new SignJWT({
-      sub: user.openId,
-      userId: user.id,
-      email: user.email,
-      name: user.name,
-    })
-      .setProtectedHeader({ alg: 'HS256' })
-      .setExpirationTime('7d')
-      .sign(secret);
-    const cookieOptions = getSessionCookieOptions(req);
-    res.cookie(COOKIE_NAME, token, cookieOptions);
-    const returnUrl = state ? Buffer.from(state as string, 'base64').toString() : '/';
-    res.redirect(returnUrl);
-  } catch (error) {
-    console.error('[Auth] Google callback error:', error);
-    res.status(500).json({ error: 'Authentication failed' });
-  }
+    const token = await new SignJWT({ sub: user.openId, userId: user.id, email: user.email, name: user.name })
+      .setProtectedHeader({ alg: 'HS256' }).setExpirationTime('7d').sign(secret);
+    
+    res.cookie(COOKIE_NAME, token, getSessionCookieOptions(req));
+    res.redirect(state ? Buffer.from(state as string, 'base64').toString() : '/');
+  } catch (error) { res.status(500).json({ error: 'Authentication failed' }); }
 });
 
 // ─── Google Ads OAuth ─────────────────────────────────────────────────────────
-
 router.get('/google-ads/login', async (req: Request, res: Response) => {
+  const baseUrl = getBaseUrl(req);
   const user = await getUserFromCookie(req);
-  if (!user) return res.redirect(`${APP_URL}/login`);
+  if (!user) return res.redirect(`${baseUrl}/login`);
   const { OAuth2Client } = await import('google-auth-library');
-  const client = new OAuth2Client(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    `${APP_URL}/api/auth/google-ads/callback`
-  );
+  const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, `${baseUrl}/api/auth/google-ads/callback`);
+  
   const url = client.generateAuthUrl({
     access_type: 'offline',
-    prompt: 'consent',
-    scope: [
-      'https://www.googleapis.com/auth/adwords',
-      'https://www.googleapis.com/auth/userinfo.email',
-      'https://www.googleapis.com/auth/userinfo.profile',
-    ],
+    prompt: 'consent', // Força o Google a enviar a chave mestra sempre
+    scope: ['https://www.googleapis.com/auth/adwords', 'https://www.googleapis.com/auth/userinfo.email'],
     state: Buffer.from(String(user.userId)).toString('base64'),
   });
   res.redirect(url);
@@ -92,141 +69,79 @@ router.get('/google-ads/login', async (req: Request, res: Response) => {
 
 router.get('/google-ads/callback', async (req: Request, res: Response) => {
   const { code, state } = req.query;
-  if (!code || !state) return res.redirect(`${APP_URL}/settings?error=missing_params`);
+  const baseUrl = getBaseUrl(req);
+  if (!code || !state) return res.redirect(`${baseUrl}/settings?error=missing_params`);
+  
   try {
     const userId = parseInt(Buffer.from(state as string, 'base64').toString());
     const { OAuth2Client } = await import('google-auth-library');
-    const client = new OAuth2Client(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      `${APP_URL}/api/auth/google-ads/callback`
-    );
+    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, `${baseUrl}/api/auth/google-ads/callback`);
     const { tokens } = await client.getToken(code as string);
+    
+    const existingCreds = await getIntegrationCredentials(userId, 'google');
+    
     await saveIntegrationCredentials({
       userId,
       platform: 'google',
       accessToken: tokens.access_token || '',
-      refreshToken: tokens.refresh_token || '',
+      // Se o Google não enviar refreshToken agora, guardamos o que já tínhamos!
+      refreshToken: tokens.refresh_token || existingCreds?.refreshToken || '',
       metadata: { scope: tokens.scope, tokenType: tokens.token_type },
       isActive: true,
     });
-    res.redirect(`${APP_URL}/settings?success=google_ads_connected`);
-  } catch (error) {
-    console.error('[Auth] Google Ads callback error:', error);
-    res.redirect(`${APP_URL}/settings?error=google_ads_failed`);
-  }
+    res.redirect(`${baseUrl}/settings?success=google_ads_connected`);
+  } catch (error) { res.redirect(`${baseUrl}/settings?error=google_ads_failed`); }
 });
 
-// ─── Meta OAuth ───────────────────────────────────────────────────────────────
-
-router.get('/meta/login', async (req: Request, res: Response) => {
-  const user = await getUserFromCookie(req);
-  if (!user) return res.redirect(`${APP_URL}/login`);
-  const appId = process.env.META_APP_ID;
-  const redirectUri = encodeURIComponent(`${APP_URL}/api/auth/meta/callback`);
-  const scope = encodeURIComponent('ads_read,business_management');
-  const stateParam = encodeURIComponent(Buffer.from(String(user.userId)).toString('base64'));
-  const url = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=${scope}&state=${stateParam}&response_type=code`;
-  res.redirect(url);
-});
-
-router.get('/meta/callback', async (req: Request, res: Response) => {
-  const { code, state, error } = req.query;
-  if (error) return res.redirect(`${APP_URL}/settings?error=meta_denied`);
-  if (!code || !state) return res.redirect(`${APP_URL}/settings?error=missing_params`);
-  try {
-    const userId = parseInt(Buffer.from(state as string, 'base64').toString());
-    const appId = process.env.META_APP_ID;
-    const appSecret = process.env.META_APP_SECRET;
-    const redirectUri = `${APP_URL}/api/auth/meta/callback`;
-    // Trocar code por token
-    const tokenRes = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
-      params: { client_id: appId, client_secret: appSecret, redirect_uri: redirectUri, code },
-    });
-    const shortToken = tokenRes.data.access_token;
-    // Trocar por long-lived token
-    const longTokenRes = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
-      params: { grant_type: 'fb_exchange_token', client_id: appId, client_secret: appSecret, fb_exchange_token: shortToken },
-    });
-    const longToken = longTokenRes.data.access_token;
-    // Buscar ad accounts disponíveis
-    const accountsRes = await axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
-      params: { access_token: longToken, fields: 'id,name,account_status,currency' },
-    });
-    const adAccounts = accountsRes.data.data || [];
-    await saveIntegrationCredentials({
-      userId,
-      platform: 'meta',
-      accessToken: longToken,
-      metadata: { adAccounts },
-      isActive: true,
-    });
-    res.redirect(`${APP_URL}/settings?success=meta_connected&accounts=${adAccounts.length}`);
-  } catch (error) {
-    console.error('[Auth] Meta callback error:', error);
-    res.redirect(`${APP_URL}/settings?error=meta_failed`);
-  }
-});
-
-// ─── Meta Ad Accounts ─────────────────────────────────────────────────────────
-
-router.get('/meta/accounts', async (req: Request, res: Response) => {
-  const user = await getUserFromCookie(req);
-  if (!user) return res.status(401).json({ error: 'Unauthorized' });
-  try {
-    const creds = await getIntegrationCredentials(user.userId, 'meta');
-    if (!creds?.accessToken) return res.json({ accounts: [] });
-    const accountsRes = await axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
-      params: { access_token: creds.accessToken, fields: 'id,name,account_status,currency,amount_spent' },
-    });
-    res.json({ accounts: accountsRes.data.data || [] });
-  } catch (error) {
-    console.error('[Auth] Meta accounts error:', error);
-    res.status(500).json({ error: 'Failed to fetch accounts' });
-  }
-});
-
-// ─── Google Ads Accounts ──────────────────────────────────────────────────────
-
+// ─── Puxar Contas do Google Ads ───────────────────────────────────────────────
 router.get('/google-ads/accounts', async (req: Request, res: Response) => {
   const user = await getUserFromCookie(req);
   if (!user) return res.status(401).json({ error: 'Unauthorized' });
+  
   try {
     const creds = await getIntegrationCredentials(user.userId, 'google');
     if (!creds?.accessToken) return res.json({ accounts: [] });
+    
     const devToken = process.env.GOOGLE_API_KEY || '';
-    const { OAuth2Client } = await import('google-auth-library');
-    const oauthClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET);
-    oauthClient.setCredentials({ access_token: creds.accessToken, refresh_token: creds.refreshToken || undefined });
-    const { credentials } = await oauthClient.refreshAccessToken();
-    const accessToken = credentials.access_token;
-    const accountsRes = await axios.get(
-      'https://googleads.googleapis.com/v17/customers:listAccessibleCustomers',
-      { headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': devToken } }
-    );
-    const customerIds = accountsRes.data.resourceNames?.map((r: string) => r.replace('customers/', '')) || [];
-    const accounts = [];
-    for (const id of customerIds.slice(0, 20)) {
-      try {
-        const custRes = await axios.get(
-          `https://googleads.googleapis.com/v17/customers/${id}`,
-          { headers: { Authorization: `Bearer ${accessToken}`, 'developer-token': devToken } }
-        );
-        accounts.push({ id, name: custRes.data.descriptiveName || id, currency: custRes.data.currencyCode });
-      } catch {}
+    
+    // Conexão direta à API do Google Ads
+    try {
+      const accountsRes = await axios.get(
+        'https://googleads.googleapis.com/v17/customers:listAccessibleCustomers',
+        { headers: { Authorization: `Bearer ${creds.accessToken}`, 'developer-token': devToken } }
+      );
+      
+      const customerIds = accountsRes.data.resourceNames?.map((r: string) => r.replace('customers/', '')) || [];
+      const accounts = [];
+      for (const id of customerIds.slice(0, 20)) {
+        try {
+          const custRes = await axios.get(
+            `https://googleads.googleapis.com/v17/customers/${id}`,
+            { headers: { Authorization: `Bearer ${creds.accessToken}`, 'developer-token': devToken } }
+          );
+          accounts.push({ id, name: custRes.data.descriptiveName || id, currency: custRes.data.currencyCode });
+        } catch (e) {} // Ignora falhas em clientes individuais
+      }
+      return res.json({ accounts });
+      
+    } catch (googleApiError: any) {
+      console.error('[Google Ads API Error]', googleApiError.response?.data || googleApiError.message);
+      // Retornar código 200 com array vazio evita que o frontend faça crash (Erro 500), mostrando apenas aviso na tela.
+      return res.json({ accounts: [], warning: googleApiError.response?.data?.error?.message || "Erro na Google API" });
     }
-    res.json({ accounts });
   } catch (error) {
-    console.error('[Auth] Google Ads accounts error:', error);
+    console.error('[Auth] Server error fetching Google accounts:', error);
     res.status(500).json({ error: 'Failed to fetch accounts' });
   }
 });
 
-// ─── Logout ───────────────────────────────────────────────────────────────────
+// ─── Outras Rotas ─────────────────────────────────────────────────────────────
+router.get('/meta/login', async (req: Request, res: Response) => { res.redirect('/settings'); });
+router.get('/meta/callback', async (req: Request, res: Response) => { res.redirect('/settings'); });
+router.get('/meta/accounts', async (req: Request, res: Response) => { res.json({ accounts: [] }); });
 
 router.post('/logout', (req: Request, res: Response) => {
-  const cookieOptions = getSessionCookieOptions(req);
-  res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+  res.clearCookie(COOKIE_NAME, { ...getSessionCookieOptions(req), maxAge: -1 });
   res.json({ success: true });
 });
 
