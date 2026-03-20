@@ -13,7 +13,7 @@ import {
   saveAiAnalysis, getAiAnalysesByUser, getAiAnalysesByClient
 } from "./db";
 import { createGroqService } from "./services/groqService";
-import { syncMetaStructure, syncMetaCampaigns, syncSelectedAccounts, syncGoogleAdsCampaigns } from "./services/syncService";
+import { syncGoogleAdsCampaigns } from "./services/syncService";
 
 export const appRouter = router({
   system: systemRouter,
@@ -124,20 +124,6 @@ export const appRouter = router({
   }),
 
   sync: router({
-    metaStructure: protectedProcedure.mutation(async ({ ctx }) => {
-      if (!ctx.user) throw new Error("Unauthorized");
-      return syncMetaStructure(ctx.user.id);
-    }),
-    metaAccount: protectedProcedure
-      .input(z.object({ accountId: z.string() }))
-      .mutation(async ({ ctx, input }) => {
-        if (!ctx.user) throw new Error("Unauthorized");
-        return syncMetaCampaigns(ctx.user.id, input.accountId);
-      }),
-    metaSelected: protectedProcedure.mutation(async ({ ctx }) => {
-      if (!ctx.user) throw new Error("Unauthorized");
-      return syncSelectedAccounts(ctx.user.id);
-    }),
     google: protectedProcedure
       .input(z.object({ customerId: z.string() }))
       .mutation(async ({ ctx, input }) => {
@@ -146,11 +132,8 @@ export const appRouter = router({
       }),
     status: protectedProcedure.query(async ({ ctx }) => {
       if (!ctx.user) throw new Error("Unauthorized");
-      const meta = await getIntegrationCredentials(ctx.user.id, "meta");
       const google = await getIntegrationCredentials(ctx.user.id, "google");
-      const accounts = await getAdAccountsByUserId(ctx.user.id);
       return {
-        meta: { connected: !!meta?.accessToken, selectedAccounts: accounts.filter(a => a.isSelected && a.platform === "meta").length },
         google: { connected: !!google?.accessToken },
       };
     }),
